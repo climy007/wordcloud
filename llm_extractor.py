@@ -25,7 +25,7 @@ from utils import logger
 class BaseLLMExtractor:
     """LLM提取器基类"""
     
-    def extract_keywords(self, text: str) -> List[Dict[str, Any]]:
+    def extract_keywords(self, text: str, exclude_keywords: set) -> List[Dict[str, Any]]:
         """提取关键词的抽象方法"""
         raise NotImplementedError
         
@@ -99,7 +99,7 @@ class BaseLLMExtractor:
 class DeepseekExtractor(BaseLLMExtractor):
     """基于Deepseek的关键词提取器"""
     
-    def extract_keywords(self, text: str) -> List[Dict[str, Any]]:
+    def extract_keywords(self, text: str, exclude_keywords: set) -> List[Dict[str, Any]]:
         """使用Deepseek API提取关键词
         
         Args:
@@ -107,6 +107,8 @@ class DeepseekExtractor(BaseLLMExtractor):
             
         Returns:
             List[Dict[str, Any]]: 关键词列表
+            :param text: 文本
+            :param exclude_keywords: 排除词
         """
         try:
             headers = {
@@ -114,11 +116,11 @@ class DeepseekExtractor(BaseLLMExtractor):
                 'Content-Type': 'application/json'
             }
 
-            prompt = self._build_prompt(text)
+            prompt = self._build_prompt(exclude_keywords)
             response = requests.post(
                 f"{API_CONFIG['DEEPSEEK_API_BASE']}/chat/completions",
                 headers=headers,
-                json=self._build_request_body(prompt),
+                json=self._build_request_body(prompt, text),
                 timeout=60
             )
 
@@ -140,7 +142,7 @@ class DeepseekExtractor(BaseLLMExtractor):
             logger.error(f"Error extracting keywords with Deepseek: {str(e)}")
             return []
             
-    def _build_prompt(self, text: str) -> str:
+    def _build_prompt(self, exclude_keywords: set) -> str:
         """构建用于LLM API的提示词模板
         
         处理逻辑:
@@ -177,18 +179,44 @@ class DeepseekExtractor(BaseLLMExtractor):
             人工智能技术飞速发展...
             ```
         """
-        return f"""请根据以下文本,提取10-15个最重要的核心关键词并给出重要性权重(0-1之间)。
-            请严格按照下面的JSON数组格式返回结果:
-            [
-                {{"keyword": "关键词1", "weight": 0.9}},
-                {{"keyword": "关键词2", "weight": 0.85}}
-            ]
-
-            文本内容:
-            {text}
-            """
+        return f'''
+                你是一位专业的文本分析专家，请从以下文本中提取最重要的关键词，用于生成词云图。
+                    ## 任务要求
+                    1. 从文本中提取最具代表性和重要性的关键词
+                    2. 排除无实际意义的虚词、介词、连词等停用词
+                    3. 考虑词语在文本中的重要程度（词频+语义重要性）
+                    4. 返回格式为JSON数组，每个元素包含关键词和其权重值
+                    5. 不统计需要排除的关键词
+                    
+                    ## 需要排除的关键词
+                    {','.join(exclude_keywords)}
+                    
+                    ## 输出格式
+                    请严格按照以下JSON格式返回结果：
+                    ```json
+                    [
+                      {{"keyword": "关键词1", "weight": 0.7}},
+                      {{"keyword": "关键词2", "weight": 0.5}},
+                      {{"keyword": "关键词3", "weight": 0.3}}
+                    ]
+                    ```
+                    
+                    ## 权重计算规则
+                    - 权重范围：0-1，1为最高重要性
+                    - 考虑因素：词频、词语长度、语义重要性、专有名词优先级
+                    - 通用词、常见动词、形容词应适当降低权重
+                    
+                    ## 处理步骤
+                    1. 先通读全文理解主题和内容
+                    2. 识别并提取核心概念和关键信息
+                    3. 计算每个关键词的重要性权重
+                    4. 选取最重要的100个关键词
+                    5. 返回JSON格式的关键词数组
+                    
+                    请直接返回JSON结果，不要添加任何解释或其他文本。
+                '''
             
-    def _build_request_body(self, prompt: str) -> Dict:
+    def _build_request_body(self, prompt: str, text: str) -> Dict:
         """构建用于API调用的请求体参数
         
         处理逻辑:
@@ -235,8 +263,8 @@ class DeepseekExtractor(BaseLLMExtractor):
         return {
             'model': 'deepseek-chat',
             'messages': [
-                {'role': 'system', 'content': '你是一个关键词提取专家'},
-                {'role': 'user', 'content': prompt}
+                {'role': 'system', 'content': prompt},
+                {'role': 'user', 'content': text},
             ],
             'temperature': 0.3
         }
@@ -246,7 +274,7 @@ class OllamaExtractor(BaseLLMExtractor):
     
     MAX_RETRIES = 5
     
-    def extract_keywords(self, text: str) -> List[Dict[str, Any]]:
+    def extract_keywords(self, text: str, exclude_keywords: set) -> List[Dict[str, Any]]:
         """使用Ollama API提取关键词
         
         Args:
@@ -254,15 +282,50 @@ class OllamaExtractor(BaseLLMExtractor):
             
         Returns:
             List[Dict[str, Any]]: 关键词列表
+            :param text:
+            :param exclude_keywords:
         """
         messages = [
             {
                 'role': 'system',
-                'content': '你是一个专业的关键词提取助手。你必须始终以严格的JSON数组格式返回结果。'
-            },
-            {
-                'role': 'user',
-                'content': self._build_initial_prompt(text)
+                'content': f'''
+                你是一位专业的文本分析专家，请从以下文本中提取最重要的关键词，用于生成词云图。
+                    ## 任务要求
+                    1. 从文本中提取最具代表性和重要性的关键词
+                    2. 排除无实际意义的虚词、介词、连词等停用词
+                    3. 考虑词语在文本中的重要程度（词频+语义重要性）
+                    4. 返回格式为JSON数组，每个元素包含关键词和其权重值
+                    
+                    ## 需要排除的关键词
+                    {','.join(exclude_keywords)}
+                    
+                    ## 输出格式
+                    请严格按照以下JSON格式返回结果：
+                    ```json
+                    [
+                      {{"keyword": "关键词1", "weight": 0.7}},
+                      {{"keyword": "关键词2", "weight": 0.2}},
+                      {{"keyword": "关键词3", "weight": 0.1}}
+                    ]
+                    ```
+                    
+                    ## 权重计算规则
+                    - 权重范围：0-1，1为最高重要性
+                    - 考虑因素：词频、词语长度、语义重要性、专有名词优先级
+                    - 通用词、常见动词、形容词应适当降低权重
+                    
+                    ## 处理步骤
+                    1. 先通读全文理解主题和内容
+                    2. 识别并提取核心概念和关键信息
+                    3. 计算每个关键词的重要性权重
+                    4. 选取最重要的100个关键词
+                    5. 返回JSON格式的关键词数组
+                    
+                    请直接返回JSON结果，不要添加任何解释或其他文本。
+                    
+                    ## 文本内容
+                    {text}
+                '''
             }
         ]
 
@@ -307,21 +370,6 @@ class OllamaExtractor(BaseLLMExtractor):
         except Exception as e:
             logger.error(f"Error extracting keywords with Ollama: {str(e)}")
             return []
-            
-    def _build_initial_prompt(self, text: str) -> str:
-        """构建初始提示词"""
-        return f"""请分析下面的文本，完成以下任务：
-            1. 提取10-15个最重要的核心关键词
-            2. 给每个关键词分配0-1之间的重要性权重
-            3. 必须严格按照以下JSON格式返回结果：
-            [
-                {{"keyword": "经济发展", "weight": 0.95}},
-                {{"keyword": "科技创新", "weight": 0.88}}
-            ]
-            
-            文本内容:
-            {text}
-            """
             
     def _build_correction_prompt(self) -> str:
         """构建纠正提示词"""

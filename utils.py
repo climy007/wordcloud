@@ -329,3 +329,56 @@ def load_github_stopwords(github_stopwords_dir: str = "github_stop_words") -> Se
     except Exception as e:
         logger.error(f"Error loading github stopwords: {e}")
         return set()
+
+def load_exclude_keywords(exclude_keywords_file: str = 'exclude_keywords.txt') -> Set[str]:
+    """从指定文件加载需要排除的关键词
+    
+    处理逻辑:
+    1. 打开排除关键词文件(使用UTF-8编码)
+    2. 按行读取排除关键词
+    3. 过滤处理:
+       - 移除空行
+       - 忽略注释行(#开头)
+       - 去除首尾空白
+    4. 转换为集合去重
+    
+    Args:
+        exclude_keywords_file: str, 排除关键词文件的路径,默认为'exclude_keywords.txt'
+        
+    Returns:
+        Set[str]: 排除关键词集合
+            - 每个词为一个独立元素
+            - 自动去除重复词
+            - 不包含空字符串
+            
+    异常处理:
+        - 文件不存在
+        - 编码错误
+        - 文件读取错误
+        出现以上情况时:
+        1. 记录警告日志
+        2. 返回空集合
+        
+    文件格式要求:
+        1. UTF-8编码的文本文件
+        2. 每行一个排除关键词
+        3. #开头的行视为注释
+        4. 支持空行(会被忽略)
+        
+    示例文件内容:
+        # 需要排除的关键词
+        测试
+        示例
+        临时
+        
+    使用建议:
+        1. 根据具体领域补充专业排除词
+        2. 定期更新排除词表
+        3. 注意排除词的规范性和完整性
+    """
+    try:
+        with open(exclude_keywords_file, 'r', encoding='utf-8') as f:
+            return {line.strip() for line in f if line.strip() and not line.startswith('#')}
+    except Exception as e:
+        logger.warning(f"Failed to load exclude keywords from {exclude_keywords_file}: {str(e)}")
+        return set()

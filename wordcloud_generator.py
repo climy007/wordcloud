@@ -132,18 +132,21 @@ class LLMWordCloudGenerator(BaseWordCloudGenerator):
     def __init__(self, 
                  mask_path: Optional[str] = None,
                  api_type: str = 'deepseek',
-                 output_dir: str = 'output'):
+                 output_dir: str = 'output',
+                 exclude_keywords: Optional[Set[str]] = None):
         """初始化词云生成器
         
         Args:
             mask_path: 蒙版图片路径
             api_type: API类型('deepseek'或'ollama')
             output_dir: 输出目录
+            exclude_keywords: 需要屏蔽的关键字集合
         """
         super().__init__(mask_path)
         self.api_type = api_type
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.exclude_keywords = exclude_keywords or set()
         
         # 初始化LLM提取器
         if api_type == 'deepseek':
@@ -277,7 +280,7 @@ class LLMWordCloudGenerator(BaseWordCloudGenerator):
             if not text:
                 return []
                 
-            keywords = self.extractor.extract_keywords(text)
+            keywords = self.extractor.extract_keywords(text, self.exclude_keywords)
             if keywords:
                 file_name = Path(doc_path).stem
                 for item in keywords:
@@ -297,6 +300,7 @@ class LLMWordCloudGenerator(BaseWordCloudGenerator):
         1. 使用defaultdict累加相同关键词的权重
         2. 对累加后的权重进行标准化(除以最大值)
            使所有权重缩放到0-1区间
+        3. 过滤掉需要屏蔽的关键词
         
         Args:
             keywords: List[Dict], 关键词列表,每项包含:
@@ -313,13 +317,20 @@ class LLMWordCloudGenerator(BaseWordCloudGenerator):
             1. 如果keywords为空,返回空字典
             2. 如果所有权重都为0,返回空字典
             3. 权重标准化可以让词云显示效果更均衡
+            4. 屏蔽的关键词会被过滤掉
         """
         if not keywords:
             return {}
             
         combined = defaultdict(float)
         for item in keywords:
-            combined[item['keyword']] += item['weight']
+            keyword = item['keyword']
+            # 过滤掉需要屏蔽的关键词
+            if keyword not in self.exclude_keywords:
+                combined[keyword] += item['weight']
+            
+        if not combined:
+            return {}
             
         # 标准化权重
         max_weight = max(combined.values())
@@ -335,7 +346,8 @@ class TfidfWordCloudGenerator(BaseWordCloudGenerator):
                  min_df: int = 2,
                  max_df: float = 0.8,
                  top_n: int = 100,
-                 output_dir: str = 'output'):
+                 output_dir: str = 'output',
+                 exclude_keywords: Optional[Set[str]] = None):
         """初始化TF-IDF词云生成器
         
         Args:
@@ -344,10 +356,12 @@ class TfidfWordCloudGenerator(BaseWordCloudGenerator):
             max_df: 最大文档频率
             top_n: 提取的关键词数量
             output_dir: 输出目录
+            exclude_keywords: 需要屏蔽的关键字集合
         """
         super().__init__(mask_path)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.exclude_keywords = exclude_keywords or set()
         
         self.vectorizer = TfidfVectorizer(
             token_pattern=r"(?u)\b\w+\b",
@@ -514,6 +528,7 @@ class TfidfWordCloudGenerator(BaseWordCloudGenerator):
         1. 数据验证:
            - 检查输入列表是否为空
            - 验证关键词和权重格式
+           - 过滤掉需要屏蔽的关键词
            
         2. 权重合并:
            - 使用defaultdict累加相同关键词的权重
@@ -547,18 +562,25 @@ class TfidfWordCloudGenerator(BaseWordCloudGenerator):
             1. 输入为空列表: 返回空字典{}
             2. 所有权重为0: 返回空字典{}
             3. 单个关键词: 权重设为1.0
+            4. 所有关键词都被屏蔽: 返回空字典{}
             
         注意:
             1. 返回的权重总是在0-1区间
             2. 权重总和可能不为1(非概率分布)
-            3. 保留了所有非零权重的关键词
+            3. 屏蔽的关键词会被过滤掉
         """
         if not keywords:
             return {}
             
         combined = defaultdict(float)
         for item in keywords:
-            combined[item['keyword']] += item['weight']
+            keyword = item['keyword']
+            # 过滤掉需要屏蔽的关键词
+            if keyword not in self.exclude_keywords:
+                combined[keyword] += item['weight']
+            
+        if not combined:
+            return {}
             
         # 标准化权重
         max_weight = max(combined.values())

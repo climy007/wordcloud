@@ -29,7 +29,7 @@ API_CONFIG = {
     
     # Ollama配置
     'OLLAMA_API_BASE': os.getenv('OLLAMA_API_BASE', 'http://localhost:11434'),
-    'OLLAMA_MODEL': os.getenv('OLLAMA_MODEL', 'qwen2.5:3b'),
+    'OLLAMA_MODEL': os.getenv('OLLAMA_MODEL', 'qwen:7b-chat'),
 }
 
 # 词云生成配置
